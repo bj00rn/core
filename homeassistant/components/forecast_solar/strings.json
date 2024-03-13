@@ -16,7 +16,9 @@
   },
   "options": {
     "error": {
-      "invalid_api_key": "[%key:common::config_flow::error::invalid_api_key%]"
+      "invalid_api_key": "[%key:common::config_flow::error::invalid_api_key%]",
+      "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
+      "invalid_parameters": "Invalid parameters provided. Please refer to the documentation."
     },
     "step": {
       "init": {

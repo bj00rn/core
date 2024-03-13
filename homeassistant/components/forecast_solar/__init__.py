@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from forecast_solar.exceptions import ForecastSolarRatelimit
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import (
     CONF_DAMPING,
@@ -39,7 +42,11 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Forecast.Solar from a config entry."""
     coordinator = ForecastSolarDataUpdateCoordinator(hass, entry)
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except ConfigEntryNotReady as e:
+        if not isinstance(e.__cause__, ForecastSolarRatelimit):
+            raise
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 

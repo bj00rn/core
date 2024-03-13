@@ -173,7 +173,6 @@ class ForecastSolarSensorEntity(
             entry_type=DeviceEntryType.SERVICE,
             identifiers={(DOMAIN, entry_id)},
             manufacturer="Forecast.Solar",
-            model=coordinator.data.account_type.value,
             name="Solar production forecast",
             configuration_url="https://forecast.solar",
         )
