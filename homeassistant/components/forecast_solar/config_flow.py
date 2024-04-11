@@ -5,6 +5,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from forecast_solar import ForecastSolar
+from forecast_solar.exceptions import (
+    ForecastSolarAuthenticationError,
+    ForecastSolarRequestError,
+)
 import voluptuous as vol
 
 from homeassistant.config_entries import (
@@ -16,6 +21,7 @@ from homeassistant.config_entries import (
 from homeassistant.const import CONF_API_KEY, CONF_LATITUDE, CONF_LONGITUDE, CONF_NAME
 from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_AZIMUTH,
@@ -47,19 +53,37 @@ class ForecastSolarFlowHandler(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle a flow initiated by the user."""
+        errors = {}
+
         if user_input is not None:
-            return self.async_create_entry(
-                title=user_input[CONF_NAME],
-                data={
-                    CONF_LATITUDE: user_input[CONF_LATITUDE],
-                    CONF_LONGITUDE: user_input[CONF_LONGITUDE],
-                },
-                options={
-                    CONF_AZIMUTH: user_input[CONF_AZIMUTH],
-                    CONF_DECLINATION: user_input[CONF_DECLINATION],
-                    CONF_MODULES_POWER: user_input[CONF_MODULES_POWER],
-                },
+            forecast = ForecastSolar(
+                session=async_get_clientsession(self.hass),
+                latitude=user_input.get(CONF_LATITUDE),
+                longitude=user_input.get(CONF_LONGITUDE),
+                declination=user_input.get(CONF_DECLINATION),
+                azimuth=(user_input.get(CONF_AZIMUTH, 0) - 180),
+                kwp=(user_input.get(CONF_MODULES_POWER, 0) / 1000),
+                damping_morning=user_input.get(CONF_DAMPING_MORNING, 0.0),
+                damping_evening=user_input.get(CONF_DAMPING_EVENING, 0.0),
+                inverter=user_input.get(CONF_INVERTER_SIZE),
             )
+            try:
+                await forecast.validate_plane()
+            except ForecastSolarRequestError:
+                errors["base"] = "invalid_parameters"
+            else:
+                return self.async_create_entry(
+                    title=user_input[CONF_NAME],
+                    data={
+                        CONF_LATITUDE: user_input[CONF_LATITUDE],
+                        CONF_LONGITUDE: user_input[CONF_LONGITUDE],
+                    },
+                    options={
+                        CONF_AZIMUTH: user_input[CONF_AZIMUTH],
+                        CONF_DECLINATION: user_input[CONF_DECLINATION],
+                        CONF_MODULES_POWER: user_input[CONF_MODULES_POWER],
+                    },
+                )
 
         return self.async_show_form(
             step_id="user",
@@ -83,8 +107,9 @@ class ForecastSolarFlowHandler(ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_MODULES_POWER): vol.All(
                         vol.Coerce(int), vol.Range(min=1)
                     ),
-                }
+                },
             ),
+            errors=errors,
         )
 
 
@@ -100,15 +125,39 @@ class ForecastSolarOptionFlowHandler(OptionsFlow):
     ) -> ConfigFlowResult:
         """Manage the options."""
         errors = {}
+
         if user_input is not None:
             if (api_key := user_input.get(CONF_API_KEY)) and RE_API_KEY.match(
                 api_key
             ) is None:
                 errors[CONF_API_KEY] = "invalid_api_key"
             else:
-                return self.async_create_entry(
-                    title="", data=user_input | {CONF_API_KEY: api_key or None}
+                forecast = ForecastSolar(
+                    api_key=api_key or None,
+                    session=async_get_clientsession(self.hass),
+                    latitude=self.config_entry.data[CONF_LATITUDE],
+                    longitude=self.config_entry.data[CONF_LONGITUDE],
+                    declination=user_input[CONF_DECLINATION],
+                    azimuth=(user_input[CONF_AZIMUTH] - 180),
+                    kwp=(user_input[CONF_MODULES_POWER] / 1000),
+                    damping_morning=user_input.get(CONF_DAMPING_MORNING, 0.0),
+                    damping_evening=user_input.get(CONF_DAMPING_EVENING, 0.0),
+                    inverter=user_input.get(CONF_INVERTER_SIZE),
                 )
+                try:
+                    if api_key:
+                        await forecast.validate_api_key()
+                except ForecastSolarAuthenticationError:
+                    errors[CONF_API_KEY] = "invalid_api_key"
+                else:
+                    try:
+                        await forecast.validate_plane()
+                    except ForecastSolarRequestError:
+                        errors["base"] = "invalid_parameters"
+                    else:
+                        return self.async_create_entry(
+                            title="", data=user_input | {CONF_API_KEY: api_key or None}
+                        )
 
         return self.async_show_form(
             step_id="init",
